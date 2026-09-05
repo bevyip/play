@@ -1,6 +1,9 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import "./sticker.css";
 
+const EASE_TAU_MS = 110;
+const PEEL_THRESHOLD = 80;
+
 const StickerPeel = ({
   imageSrc,
   rotate = 30,
@@ -13,188 +16,227 @@ const StickerPeel = ({
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [peelAmount, setPeelAmount] = useState(0);
+  const [displayedPeel, setDisplayedPeel] = useState(0);
   const [isPeeled, setIsPeeled] = useState(false);
-  const [startY, setStartY] = useState(0);
-  const [currentY, setCurrentY] = useState(0);
-
+  const [isFalling, setIsFalling] = useState(false);
+  const [isTouchActive, setIsTouchActive] = useState(false);
   const defaultPadding = 10;
-  const peelThreshold = 80; // Percentage to fully peel
 
-  // Update container class based on drag state
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+  const isDraggingRef = useRef(false);
+  const isPeeledRef = useRef(false);
+  const startYRef = useRef(0);
+  const targetPeelRef = useRef(0);
+  const displayedPeelRef = useRef(0);
+  const peelTriggeredRef = useRef(false);
+  const rafRef = useRef(null);
+  const lastTsRef = useRef(null);
+  const fallTimeoutRef = useRef(null);
+  const resetTimeoutRef = useRef(null);
+  const hoverPctRef = useRef(peelBackHoverPct);
 
-    if (isDragging && !isPeeled) {
-      container.classList.add("dragging");
-    } else {
-      container.classList.remove("dragging");
+  hoverPctRef.current = peelBackHoverPct;
+
+  const stopEaseLoop = () => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
-  }, [isDragging, isPeeled]);
+    lastTsRef.current = null;
+  };
+
+  const beginPeelFall = () => {
+    if (peelTriggeredRef.current) return;
+    peelTriggeredRef.current = true;
+    isPeeledRef.current = true;
+    isDraggingRef.current = false;
+    setIsPeeled(true);
+    setIsDragging(false);
+    stopEaseLoop();
+
+    fallTimeoutRef.current = setTimeout(() => {
+      setIsFalling(true);
+    }, 500);
+
+    resetTimeoutRef.current = setTimeout(() => {
+      setIsPeeled(false);
+      setIsFalling(false);
+      setIsDragging(false);
+      setIsTouchActive(false);
+      setDisplayedPeel(0);
+      targetPeelRef.current = 0;
+      displayedPeelRef.current = 0;
+      isDraggingRef.current = false;
+      isPeeledRef.current = false;
+      peelTriggeredRef.current = false;
+      startYRef.current = 0;
+    }, 1200);
+  };
+
+  const beginPeelFallRef = useRef(beginPeelFall);
+  beginPeelFallRef.current = beginPeelFall;
+
+  const tick = (ts) => {
+    const last = lastTsRef.current ?? ts;
+    lastTsRef.current = ts;
+    const dt = Math.min(ts - last, 50);
+
+    const target = targetPeelRef.current;
+    const current = displayedPeelRef.current;
+    const next = current + (target - current) * (1 - Math.exp(-dt / EASE_TAU_MS));
+    const displayed = Math.abs(target - next) < 0.05 ? target : next;
+
+    displayedPeelRef.current = displayed;
+    setDisplayedPeel(displayed);
+
+    if (displayed >= PEEL_THRESHOLD && !peelTriggeredRef.current) {
+      beginPeelFallRef.current();
+      return;
+    }
+
+    const stillEasing = Math.abs(target - displayed) >= 0.05;
+    if (isDraggingRef.current || stillEasing) {
+      rafRef.current = requestAnimationFrame(tick);
+    } else {
+      rafRef.current = null;
+      lastTsRef.current = null;
+    }
+  };
+
+  const ensureEaseLoop = () => {
+    if (rafRef.current == null) {
+      lastTsRef.current = null;
+      rafRef.current = requestAnimationFrame(tick);
+    }
+  };
+
+  const setTargetPeel = (value) => {
+    targetPeelRef.current = Math.min(100, Math.max(0, value));
+    ensureEaseLoop();
+  };
+
+  const peelFromPointerY = (clientY) => {
+    const container = containerRef.current;
+    if (!container) return hoverPctRef.current;
+
+    const downDistance = Math.max(0, clientY - startYRef.current);
+    const maxDrag = container.getBoundingClientRect().height * 0.8;
+    const hoverPct = hoverPctRef.current;
+    return hoverPct + (downDistance / maxDrag) * (100 - hoverPct);
+  };
 
   useEffect(() => {
-    const container = containerRef.current;
     const wrapper = wrapperRef.current;
-    if (!container || !wrapper) return;
+    if (!wrapper) return;
+
+    const handlePointerDown = (clientY, { touch = false } = {}) => {
+      if (isPeeledRef.current) return;
+
+      const hoverPct = hoverPctRef.current;
+      startYRef.current = clientY;
+      isDraggingRef.current = true;
+      targetPeelRef.current = hoverPct;
+      displayedPeelRef.current = hoverPct;
+      setDisplayedPeel(hoverPct);
+      setIsDragging(true);
+      if (touch) setIsTouchActive(true);
+      ensureEaseLoop();
+    };
+
+    const handlePointerMove = (clientY) => {
+      if (!isDraggingRef.current || isPeeledRef.current) return;
+      setTargetPeel(peelFromPointerY(clientY));
+    };
+
+    const handlePointerUp = () => {
+      if (isPeeledRef.current) {
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        setIsTouchActive(false);
+        return;
+      }
+
+      if (isDraggingRef.current) {
+        const hoverPct = hoverPctRef.current;
+        targetPeelRef.current = hoverPct;
+        displayedPeelRef.current = hoverPct;
+        setDisplayedPeel(hoverPct);
+        stopEaseLoop();
+      }
+
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      setIsTouchActive(false);
+    };
 
     const handleMouseDown = (e) => {
-      setIsDragging(true);
-      setStartY(e.clientY);
-      setCurrentY(e.clientY);
+      handlePointerDown(e.clientY);
       e.preventDefault();
     };
 
     const handleMouseMove = (e) => {
-      if (!isDragging || isPeeled) return;
-
-      const newY = e.clientY;
-      setCurrentY(newY);
-
-      const rect = container.getBoundingClientRect();
-      const dragDistance = newY - startY;
-
-      // Only allow downward dragging
-      if (dragDistance < 0) return;
-
-      const maxDrag = rect.height * 0.8; // Max drag distance
-      const newPeelAmount = Math.min(
-        100,
-        Math.max(0, (dragDistance / maxDrag) * 100)
-      );
-
-      setPeelAmount(newPeelAmount);
-
-      if (newPeelAmount >= peelThreshold && !isPeeled) {
-        setIsPeeled(true);
-        container.classList.add("peeled");
-
-        // Delay falling animation to allow flap to fully invert
-        setTimeout(() => {
-          wrapper.classList.add("falling");
-        }, 500);
-
-        // Reset after animation completes (500ms delay + 600ms fall + buffer)
-        setTimeout(() => {
-          setIsPeeled(false);
-          setPeelAmount(0);
-          setIsDragging(false);
-          setStartY(0);
-          setCurrentY(0);
-          container.classList.remove("peeled");
-          wrapper.classList.remove("falling");
-        }, 1200);
-      }
-    };
-
-    const handleMouseUp = () => {
-      if (isDragging && !isPeeled) {
-        // If not fully peeled, snap back
-        setPeelAmount(0);
-      }
-      setIsDragging(false);
+      handlePointerMove(e.clientY);
     };
 
     const handleTouchStart = (e) => {
-      setIsDragging(true);
-      setStartY(e.touches[0].clientY);
-      setCurrentY(e.touches[0].clientY);
-      container.classList.add("touch-active");
+      handlePointerDown(e.touches[0].clientY, { touch: true });
     };
 
     const handleTouchMove = (e) => {
-      if (!isDragging || isPeeled) return;
-
-      e.preventDefault(); // Prevent scrolling
-
-      const newY = e.touches[0].clientY;
-      setCurrentY(newY);
-
-      const rect = container.getBoundingClientRect();
-      const dragDistance = newY - startY;
-
-      // Only allow downward dragging
-      if (dragDistance < 0) return;
-
-      const maxDrag = rect.height * 0.8;
-      const newPeelAmount = Math.min(
-        100,
-        Math.max(0, (dragDistance / maxDrag) * 100)
-      );
-
-      setPeelAmount(newPeelAmount);
-
-      if (newPeelAmount >= peelThreshold && !isPeeled) {
-        setIsPeeled(true);
-        container.classList.add("peeled");
-
-        // Delay falling animation to allow flap to fully invert
-        setTimeout(() => {
-          wrapper.classList.add("falling");
-        }, 500);
-
-        // Reset after animation completes (500ms delay + 600ms fall + buffer)
-        setTimeout(() => {
-          setIsPeeled(false);
-          setPeelAmount(0);
-          setIsDragging(false);
-          setStartY(0);
-          setCurrentY(0);
-          container.classList.remove("peeled");
-          wrapper.classList.remove("falling");
-        }, 1200);
-      }
-    };
-
-    const handleTouchEnd = () => {
-      if (isDragging && !isPeeled) {
-        setPeelAmount(0);
-      }
-      setIsDragging(false);
-      container.classList.remove("touch-active");
+      if (!isDraggingRef.current || isPeeledRef.current) return;
+      e.preventDefault();
+      handlePointerMove(e.touches[0].clientY);
     };
 
     wrapper.addEventListener("mousedown", handleMouseDown);
     window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    wrapper.addEventListener("touchstart", handleTouchStart);
-    wrapper.addEventListener("touchmove", handleTouchMove);
-    wrapper.addEventListener("touchend", handleTouchEnd);
-    wrapper.addEventListener("touchcancel", handleTouchEnd);
+    window.addEventListener("mouseup", handlePointerUp);
+    wrapper.addEventListener("touchstart", handleTouchStart, { passive: true });
+    wrapper.addEventListener("touchmove", handleTouchMove, { passive: false });
+    wrapper.addEventListener("touchend", handlePointerUp);
+    wrapper.addEventListener("touchcancel", handlePointerUp);
 
     return () => {
       wrapper.removeEventListener("mousedown", handleMouseDown);
       window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mouseup", handlePointerUp);
       wrapper.removeEventListener("touchstart", handleTouchStart);
       wrapper.removeEventListener("touchmove", handleTouchMove);
-      wrapper.removeEventListener("touchend", handleTouchEnd);
-      wrapper.removeEventListener("touchcancel", handleTouchEnd);
+      wrapper.removeEventListener("touchend", handlePointerUp);
+      wrapper.removeEventListener("touchcancel", handlePointerUp);
+      stopEaseLoop();
+      if (fallTimeoutRef.current) clearTimeout(fallTimeoutRef.current);
+      if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
     };
-  }, [isDragging, isPeeled, startY, peelThreshold, currentY]);
+  }, []);
 
   const cssVars = useMemo(
     () => ({
       "--sticker-rotate": `${rotate}deg`,
       "--sticker-p": `${defaultPadding}px`,
       "--sticker-peelback-hover": `${peelBackHoverPct}%`,
-      "--sticker-peelback-drag": `${peelAmount}%`,
+      "--sticker-peelback-drag": `${displayedPeel}%`,
       "--sticker-width": `${width}px`,
       "--sticker-shadow-opacity": shadowIntensity,
       "--peel-direction": `${peelDirection}deg`,
     }),
-    [
-      rotate,
-      peelBackHoverPct,
-      peelAmount,
-      width,
-      shadowIntensity,
-      peelDirection,
-    ]
+    [rotate, peelBackHoverPct, displayedPeel, width, shadowIntensity, peelDirection]
   );
 
+  const containerClassName = [
+    "sticker-container",
+    isDragging && !isPeeled ? "dragging" : "",
+    isPeeled ? "peeled" : "",
+    isTouchActive ? "touch-active" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const wrapperClassName = [className, isFalling ? "falling" : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className={className} ref={wrapperRef} style={cssVars}>
+    <div className={wrapperClassName} ref={wrapperRef} style={cssVars}>
       <svg width="0" height="0">
         <defs>
           <filter id="dropShadow">
@@ -215,7 +257,7 @@ const StickerPeel = ({
         </defs>
       </svg>
 
-      <div className="sticker-container" ref={containerRef}>
+      <div className={containerClassName} ref={containerRef}>
         <div className="sticker-main">
           <img
             src={imageSrc}

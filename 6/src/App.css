@@ -1,65 +1,79 @@
 .app-wrapper {
-  min-height: 100vh;
+  --sticker-gap: clamp(8px, 2.5vmin, 40px);
+  height: 100%;
+  max-height: 100dvh;
   background: #0f0f0f;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px;
+  gap: clamp(8px, 1.5vh, 24px);
+  padding: 64px 20px;
+  overflow: hidden;
 }
 
 .app-header {
   text-align: center;
+  flex-shrink: 0;
 }
 
 .app-title {
   color: #ffffff;
-  font-size: 2.5rem;
+  font-size: clamp(1.4rem, 4vh, 2.5rem);
   font-weight: bold;
   margin-bottom: 10px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .app-subtitle {
   color: #aaaaaa;
-  font-size: 1.1rem;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: clamp(0.85rem, 2vh, 1.1rem);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .app-container {
+  --sticker-size: min(
+    var(--sticker-width, 200px),
+    calc((100cqw - 2 * var(--sticker-gap)) / 3),
+    calc((100cqh - 2 * var(--sticker-gap)) / 3)
+  );
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 40px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: var(--sticker-gap);
   justify-content: center;
   align-items: center;
   width: 100%;
   max-width: 800px;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  container-type: size;
 }
 
 .sticker-wrapper {
   display: flex;
   justify-content: center;
   align-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
-/* Mobile styles */
+.sticker-wrapper > * {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 @media (max-width: 768px) {
-  .app-header {
-    margin-bottom: 20px;
-  }
-
-  .app-title {
-    font-size: 1.8rem;
-    margin-bottom: 8px;
-  }
-
-  .app-subtitle {
-    font-size: 0.9rem;
-  }
-
-  .app-container {
-    gap: 0;
-    max-width: 100%;
+  .app-wrapper {
+    padding: 48px 20px;
   }
 }
-
